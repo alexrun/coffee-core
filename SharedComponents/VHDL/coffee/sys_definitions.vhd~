@@ -1,0 +1,195 @@
+-----------------------------------------------------------------------------------------------------------
+--
+--                                    SYSTEM BASIC DEFINITIONS
+--
+-- This file contains basic parameters definitions.     
+--
+-- Created by Fabio Garzia, 2007
+--
+-----------------------------------------------------------------------------------------------------------
+
+-------------------------------------------------------------------------------
+-- The contents of this file are subject to the LGPL License.
+-- You may not use this file except in compliance with the LGPL License.
+-- You may see a copy of the LGPL License in the LGPL_license.txt file, present
+-- in the main directory, or on the internet at the URL:
+-- http://www.gnu.org/copyleft/lesser.html
+--
+-- This VHDL code is distributed on an "AS IS" basis,
+-- WITHOUT WARRANTY OF ANY KIND, either express or implied.
+-- See the LGPL License for the specific language governing rights and
+-- limitations under the LGPL License.
+--
+-- This code was initially developed at "Department of Digital and Computer
+-- Systems", Tampere University of Technology (TUT), Tampere, Finland.
+--
+-- Please direct any comments regarding this license to claudio.brunelli@tut.fi
+-------------------------------------------------------------------------------
+
+LIBRARY IEEE;
+USE IEEE.std_logic_1164.ALL;
+USE IEEE.std_logic_arith.ALL;
+
+
+PACKAGE sys_definitions IS
+
+-----------------------------------------------------------------------------------------------------------
+--
+-- bus width configuration
+--
+-----------------------------------------------------------------------------------------------------------
+
+   CONSTANT word_width   : POSITIVE := 32;  -- data bus width
+   CONSTANT m            : POSITIVE := 12;  -- amount of sub-buses in the register delay chain 
+   CONSTANT n            : POSITIVE := 5;  -- width of sub-buses in the register delay chain 
+   CONSTANT buffer_width : POSITIVE := 32;  -- RF output tristate buffers width
+
+-----------------------------------------------------------------------------------------------------------
+--
+-- main constants
+--
+-----------------------------------------------------------------------------------------------------------
+
+   CONSTANT reset_active : STD_LOGIC := '0';  -- active low (integration with coffee)
+   CONSTANT we_active    : STD_LOGIC := '1';
+   CONSTANT oe_active    : STD_LOGIC := '1';
+
+
+-----------------------------------------------------------------------------------------------------------
+--
+-- user defined types
+--
+-----------------------------------------------------------------------------------------------------------
+
+   TYPE bus_mXn IS ARRAY (m DOWNTO 0) OF STD_LOGIC_VECTOR(n-1 DOWNTO 0);
+
+   CONSTANT System_Data_Width        : INTEGER                       := 32;
+   CONSTANT System_Address_Width     : INTEGER                       := 32;
+   CONSTANT alternative_boot_address : STD_LOGIC_VECTOR(31 DOWNTO 0) := "00000000000000000001111100000000";
+   -----------------------------------------------------------------------------
+   -- SYSTEM CONFIGURATION
+   -----------------------------------------------------------------------------
+
+   -- Synthesizable
+   CONSTANT SYNTHESIZABLE  : BOOLEAN := FALSE;
+-- CONSTANT SYNTHESIZABLE : boolean := TRUE;
+   -- Butter
+   CONSTANT INCLUDE_BUTTER : BOOLEAN := TRUE;
+-- CONSTANT INCLUDE_BUTTER : BOOLEAN := FALSE;
+   CONSTANT INCLUDE_FPU    : BOOLEAN := TRUE;
+-- CONSTANT INCLUDE_FPU : BOOLEAN := FALSE;
+   -- Data Cache
+--   constant include_Dcache : integer := 1;
+   -- Instruction Cache
+--   constant include_Icache : integer := 1;
+   -- Boot Up Rom
+--   constant include_Rom : integer := 1;
+------------------------------------------------------
+-- ADDRESS SPACE MAPPING
+------------------------------------------------------
+
+   TYPE addr_limits IS
+      RECORD
+         StartAddr : INTEGER;
+         EndAddr   : INTEGER;
+      END RECORD;
+
+   TYPE address_space IS ARRAY (INTEGER RANGE <>) OF addr_limits;
+
+-- Note: the address space can be defined specifying the start and the end
+-- address for each peripheral.
+-- if MDA_ADDRMAP_LSB=12 then the range (16#40000#, 16#40007#) corresponds to the space
+-- 40000000 <-> 40007FFF
+
+   CONSTANT MDA_addrmap_msb  : INTEGER := 12;
+   CONSTANT MDA_addrmap_lsb  : INTEGER := 20;
+   CONSTANT MDA_slave_number : INTEGER := 2;
+
+   -- MDA SLAVES IDs; used as index of address_space
+
+   CONSTANT ID_DMEM : INTEGER := 0;
+   CONSTANT ID_IMEM : INTEGER := 1;
+
+   CONSTANT MDA_space : address_space(0 TO MDA_slave_number - 1) := (
+
+      (16#00000#, 16#3FFFF#),           -- slave ID: 0  (dmem)
+      (16#40000#, 16#47FFF#)            -- slave ID: 1  (imem) 
+      );
+
+   -- PCB Devices
+   --------------------------------------------------
+   -- number of PCB slave devices
+
+   CONSTANT PCB_slave_number : INTEGER := 8;
+   CONSTANT PCB_sel_width    : INTEGER := 3;
+
+   --------------------------------------------------------------------------
+   -- Settings for address decoding. 
+   --------------------------------------------------------------------------
+   CONSTANT PCB_base_addr   : INTEGER := 16#100000#;
+   CONSTANT PCB_end_addr    : INTEGER := 16#57FFFF#;
+   CONSTANT PCB_addrmap_msb : INTEGER := 8;
+   CONSTANT PCB_addrmap_lsb : INTEGER := 24;
+
+   -- SLAVES bus address mapping (there is no distinction
+   -- between PCB and MEM space (anymore))
+
+   --CONSTANT PID_IMEM   : INTEGER := 0;
+   CONSTANT PID_DMEM  : INTEGER := 0;
+   CONSTANT PID_UART  : INTEGER := 1;
+   CONSTANT PID_FBUF  : INTEGER := 2;
+   CONSTANT PID_CODEC : INTEGER := 3;
+   CONSTANT PID_FBCTR : INTEGER := 4;
+   CONSTANT PID_TB    : INTEGER := 5;
+   CONSTANT PID_DMA   : INTEGER := 6;
+   CONSTANT PID_REGS  : INTEGER := 7;
+
+
+   CONSTANT PCB_space : address_space(0 TO PCB_slave_number - 1) := (
+      (16#000000#, 16#03FFFF#),         -- data memory
+      (16#200000#, 16#20000F#),         -- uart
+      (16#300000#, 16#37FFFF#),         -- framebuffer
+      (16#380000#, 16#380000#),         -- codec
+      (16#3C0000#, 16#3C0000#),         -- framebuffer control
+      (16#400000#, 16#47FFFF#),         -- textbuffer    
+      (16#500000#, 16#57FFFF#),         -- butterdma    
+      (16#390000#, 16#390000#)          -- switch registers
+      );
+
+
+-- constant pda_cs_hi_bnd : integer := 22;
+-- constant pda_cs_lo_bnd : integer := 20;
+-- constant pda_cs_length : integer := (pda_cs_hi_bnd-pda_cs_lo_bnd+1);
+-- constant pcb_cs_length : integer := (pda_cs_hi_bnd-pda_cs_lo_bnd+1);
+
+
+
+-- constant mda_cs_hi_bnd : integer := 18;
+-- constant mda_cs_lo_bnd : integer := 18;
+-- constant mda_cs_length : integer := (mda_cs_hi_bnd-mda_cs_lo_bnd+1);
+
+   --------------------------------------------------------------------------
+   -- Coprocessor IDs (devices on coprocessor bus)
+   --------------------------------------------------------------------------
+   
+   CONSTANT MILK_ID : INTEGER := 1;
+   CONSTANT SSEG_ID : INTEGER := 2;
+   CONSTANT ENET_ID : INTEGER := 3;
+
+END sys_definitions;
+
+
+
+PACKAGE BODY sys_definitions IS
+END sys_definitions;
+
+
+
+
+
+
+
+
+
+
+

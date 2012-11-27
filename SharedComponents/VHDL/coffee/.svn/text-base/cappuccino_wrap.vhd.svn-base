@@ -1,0 +1,403 @@
+----------------------------------------------------------------------
+-- Department of Computer Systems, Tampere University of Technology  --
+----------------------------------------------------------------------
+-- Project      : DMA_platform
+-- Author       : Fabio Garzia
+-- e-mail       : fabio.garzia@tut.fi
+-- Date         : 10-Mar-2008 16:54:44
+-- File         : cappuccino_wrap.vhd
+-- Design       : 
+----------------------------------------------------------------------
+-- Description : Wrapper for cappuccino block. Include devices connected
+-- to coprocessor interface and instruction memory
+----------------------------------------------------------------------
+--Copyright (c) 2008, Tampere University of Technology.
+--All rights reserved.
+
+--Redistribution and use in source and binary forms, with or without modification,
+--are permitted provided that the following conditions are met:
+--* Redistributions of source code must retain the above copyright notice,
+-- this list of conditions and the following disclaimer.
+--* Redistributions in binary form must reproduce the above copyright notice,
+-- this list of conditions and the following disclaimer in the documentation
+-- and/or other materials provided with the distribution.
+--* Neither the name of Tampere University of Technology nor the names of its
+-- contributors may be used to endorse or promote products derived from this
+-- software without specific prior written permission.
+
+--THIS HARDWARE DESCRIPTION OR SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+--CONTRIBUTORS << AS IS >> AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+--LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND NONINFRINGEMENT AND
+--FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+--OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+--EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+--PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+--BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+--CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+--ARISING IN ANY WAY OUT OF THE USE OF THIS HARDWARE DESCRIPTION OR SOFTWARE, EVEN
+--IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+--
+--------------------------------------------------------------------
+LIBRARY ieee;
+USE ieee.std_logic_1164.ALL;
+USE ieee.std_logic_arith.ALL;
+USE IEEE.numeric_std.ALL;
+
+LIBRARY coffee;
+USE coffee.core_constants_pkg.ALL;
+
+LIBRARY coffee_peripherals;
+
+LIBRARY milk;
+USE milk.cop_definitions.ALL;
+
+LIBRARY components;
+USE components.sys_definitions.ALL;
+USE components.sys_components.ALL;
+
+ENTITY cappuccino_wrap IS
+
+   PORT (
+      reset     : IN  STD_LOGIC;
+      clk       : IN  STD_LOGIC;
+      mem_clk   : IN  STD_LOGIC;
+      cpu_cmiss : IN  STD_LOGIC;
+      cpu_read  : OUT STD_LOGIC;
+      cpu_write : OUT STD_LOGIC;
+      cpu_addr  : OUT STD_LOGIC_VECTOR (31 DOWNTO 0);
+      cpu_data  : IN  STD_LOGIC_VECTOR (31 DOWNTO 0);
+      cpu_q     : OUT STD_LOGIC_VECTOR (31 DOWNTO 0);
+
+      ------------------------------------------------------------------
+      -- EXTERNAL SIGNALS
+      ------------------------------------------------------------------
+      buttons : IN  STD_LOGIC_VECTOR (3 DOWNTO 0);
+      leds    : OUT STD_LOGIC_VECTOR (7 DOWNTO 0);
+
+      fse_A      : OUT STD_LOGIC_VECTOR(15 DOWNTO 1);
+      enet_BE_n  : OUT STD_LOGIC_VECTOR(3 DOWNTO 0);
+      enet_AEN   : OUT STD_LOGIC;
+      enet_IOR_n : OUT STD_LOGIC;
+      enet_IOW_n : OUT STD_LOGIC;
+      enet_ADS_n : OUT STD_LOGIC;
+
+      enet_INTR0   : IN STD_LOGIC;
+      enet_LDEV_n  : IN STD_LOGIC;
+      enet_IOCHRDY : IN STD_LOGIC;
+
+      enet_LCLK     : OUT STD_LOGIC;
+      enet_DATACS_n : OUT STD_LOGIC;
+      enet_W_R_n    : OUT STD_LOGIC;
+      enet_CYCLE_n  : OUT STD_LOGIC;
+      enet_RDYRTN_n : OUT STD_LOGIC;
+
+      enet_SRDY_n  : IN    STD_LOGIC;
+      enet_VLBUS_n : OUT   STD_LOGIC;
+      fse_D        : INOUT STD_LOGIC_VECTOR(31 DOWNTO 0);
+
+      ss_a_decoded : OUT STD_LOGIC_VECTOR (6 DOWNTO 0);
+      ss_b_decoded : OUT STD_LOGIC_VECTOR (6 DOWNTO 0);
+      ss_a_dot     : OUT STD_LOGIC;
+      ss_b_dot     : OUT STD_LOGIC
+
+      );
+END cappuccino_wrap;
+
+ARCHITECTURE struct OF cappuccino_wrap IS
+
+   SIGNAL bttn0_sync     : STD_LOGIC;
+   SIGNAL bttn1_sync     : STD_LOGIC;
+   SIGNAL bttn2_sync     : STD_LOGIC;
+   SIGNAL bttn3_sync     : STD_LOGIC;
+   SIGNAL stall          : STD_LOGIC;
+   SIGNAL cop_q          : STD_LOGIC_VECTOR(31 DOWNTO 0);
+   SIGNAL cop_data       : STD_LOGIC_VECTOR(31 DOWNTO 0);
+   SIGNAL cop_exc        : STD_LOGIC_VECTOR(3 DOWNTO 0);
+   SIGNAL cop_id         : STD_LOGIC_VECTOR(1 DOWNTO 0);
+   SIGNAL cop_rd         : STD_LOGIC;
+   SIGNAL cop_rgi        : STD_LOGIC_VECTOR(4 DOWNTO 0);
+   SIGNAL cop_wr         : STD_LOGIC;
+   SIGNAL wr             : STD_LOGIC;
+   SIGNAL pcb_wr         : STD_LOGIC;
+   SIGNAL rd             : STD_LOGIC;
+   SIGNAL pcb_rd         : STD_LOGIC;
+   SIGNAL p_rst_n        : STD_LOGIC;
+   SIGNAL rst_n, restart : STD_LOGIC;
+   SIGNAL inta           : STD_LOGIC;
+   SIGNAL intb           : STD_LOGIC;
+   SIGNAL enet_int       : STD_LOGIC;
+   SIGNAL imem_addr      : STD_LOGIC_VECTOR(31 DOWNTO 0);
+   SIGNAL imem_q         : STD_LOGIC_VECTOR(31 DOWNTO 0);
+   SIGNAL ext_interrupt  : STD_LOGIC_VECTOR(7 DOWNTO 0);
+
+   COMPONENT sp_imem
+      GENERIC (
+         input_file_name :    STRING   := "../SOFTWARE/demo_ts.hex";
+         num_of_words    :    POSITIVE := 8192;  --number of 64 bits words
+         addr_width      :    POSITIVE := 13);  -- refers to word address
+      PORT(
+         clk             : IN STD_LOGIC;
+
+         ------------------------------------------------------------------
+         -- LOCAL PORT (only reading)
+         ------------------------------------------------------------------)
+         addr_A : IN  STD_LOGIC_VECTOR (addr_width - 1 DOWNTO 0);
+         q_A    : OUT STD_LOGIC_VECTOR (31 DOWNTO 0)
+         );
+   END COMPONENT;
+
+   COMPONENT enet_if
+      GENERIC(
+         COPID :    NATURAL RANGE 0 TO 3
+         );
+      PORT(
+         clk   : IN STD_LOGIC;
+         rst_n : IN STD_LOGIC;
+
+         fse_A      : OUT STD_LOGIC_VECTOR(15 DOWNTO 1);
+         enet_BE_n  : OUT STD_LOGIC_VECTOR(3 DOWNTO 0);
+         enet_AEN   : OUT STD_LOGIC;
+         enet_IOR_n : OUT STD_LOGIC;
+         enet_IOW_n : OUT STD_LOGIC;
+         enet_ADS_n : OUT STD_LOGIC;    --active low address latch
+
+         enet_INTR0   : IN STD_LOGIC;
+         enet_LDEV_n  : IN STD_LOGIC;   --local device signal (buffered)
+         enet_IOCHRDY : IN STD_LOGIC;
+
+         enet_LCLK     : OUT STD_LOGIC;  --tied high for async. mode
+         enet_DATACS_n : OUT STD_LOGIC;  --direct data register access
+         enet_W_R_n    : OUT STD_LOGIC;  --tied high for async. mode
+         enet_CYCLE_n  : OUT STD_LOGIC;  --tied high for async. mode
+         enet_RDYRTN_n : OUT STD_LOGIC;  --tied high for async. mode
+
+         enet_SRDY_n  : IN    STD_LOGIC;  --NC
+         enet_VLBUS_n : OUT   STD_LOGIC;  --tied high for async. mode
+         fse_D        : INOUT STD_LOGIC_VECTOR(31 DOWNTO 0);
+
+         -- COFFEE coprocessor interface
+         cop_rd   : IN    STD_LOGIC;
+         cop_wr   : IN    STD_LOGIC;
+         cop_id   : IN    STD_LOGIC_VECTOR(1 DOWNTO 0);
+         cop_rgi  : IN    STD_LOGIC_VECTOR(4 DOWNTO 0);
+         cop_data : INOUT STD_LOGIC_VECTOR(31 DOWNTO 0);
+         enet_int : OUT   STD_LOGIC
+         );
+   END COMPONENT;
+
+   COMPONENT decoder_7segs
+      GENERIC(
+         COPID        :     INTEGER
+         );
+      PORT(
+         clk          : IN  STD_LOGIC;
+         rst_n        : IN  STD_LOGIC;
+         cop_id       : IN  STD_LOGIC_VECTOR (1 DOWNTO 0);
+         cop_wr       : IN  STD_LOGIC;
+         value_a      : IN  STD_LOGIC_VECTOR (7 DOWNTO 0);
+         value_b      : IN  STD_LOGIC_VECTOR (7 DOWNTO 0);
+         dot_a        : IN  STD_LOGIC;
+         dot_b        : IN  STD_LOGIC;
+         blank        : IN  STD_LOGIC;
+         sel          : IN  STD_LOGIC;
+         ss_a_decoded : OUT STD_LOGIC_VECTOR (6 DOWNTO 0);
+         ss_b_decoded : OUT STD_LOGIC_VECTOR (6 DOWNTO 0);
+         ss_a_dot     : OUT STD_LOGIC;
+         ss_b_dot     : OUT STD_LOGIC;
+         leds         : OUT STD_LOGIC_VECTOR (6 DOWNTO 0)
+         );
+   END COMPONENT;
+
+   COMPONENT stall_switch
+      PORT (
+         bttn_in   : IN  STD_LOGIC_VECTOR (3 DOWNTO 0);
+         clk       : IN  STD_LOGIC;
+         bttn0_out : OUT STD_LOGIC;
+         bttn1_out : OUT STD_LOGIC;
+         bttn2_out : OUT STD_LOGIC;
+         bttn3_out : OUT STD_LOGIC;
+         led       : OUT STD_LOGIC;
+         stall     : OUT STD_LOGIC
+         );
+   END COMPONENT;
+
+   COMPONENT core
+      GENERIC (
+         FPU_FU        :     BOOLEAN);
+      PORT (
+         reboot        : IN  STD_LOGIC;
+         restart       : IN  STD_LOGIC;
+         boot_sel      : IN  STD_LOGIC;
+         bus_req       : IN  STD_LOGIC;
+         clk           : IN  STD_LOGIC;
+         cop0_exc      : IN  STD_LOGIC;
+         cop2_exc      : IN  STD_LOGIC;
+         cop3_exc      : IN  STD_LOGIC;
+         d_cache_miss  : IN  STD_LOGIC;
+         ext_handler   : IN  STD_LOGIC;
+         ext_interrupt : IN  STD_LOGIC_VECTOR (7 DOWNTO 0);
+         i_cache_miss  : IN  STD_LOGIC;
+         i_word        : IN  STD_LOGIC_VECTOR (31 DOWNTO 0);
+         offset        : IN  STD_LOGIC_VECTOR (7 DOWNTO 0);
+         rst_n         : IN  STD_LOGIC;
+         stall         : IN  STD_LOGIC;
+         bus_ack       : OUT STD_LOGIC;
+         cop_id        : OUT STD_LOGIC_VECTOR (1 DOWNTO 0);
+         cop_rd        : OUT STD_LOGIC;
+         cop_rgi       : OUT STD_LOGIC_VECTOR (4 DOWNTO 0);
+         cop_wr        : OUT STD_LOGIC;
+         i_addr        : OUT STD_LOGIC_VECTOR (31 DOWNTO 0);
+         int_ack       : OUT STD_LOGIC;
+         int_done      : OUT STD_LOGIC;
+         pcb_rd        : OUT STD_LOGIC;
+         pcb_wr        : OUT STD_LOGIC;
+         rd            : OUT STD_LOGIC;
+         reset_n_out   : OUT STD_LOGIC;
+         wr            : OUT STD_LOGIC;
+         cop_data      : IN  STD_LOGIC_VECTOR (31 DOWNTO 0);
+         cop_q         : OUT STD_LOGIC_VECTOR (31 DOWNTO 0);
+         d_addr        : OUT STD_LOGIC_VECTOR (31 DOWNTO 0);
+         data_in       : IN  STD_LOGIC_VECTOR (31 DOWNTO 0);
+         data_out      : OUT STD_LOGIC_VECTOR (31 DOWNTO 0)
+         );
+   END COMPONENT;
+
+
+BEGIN  -- struct
+   rst_n            <= reset AND restart;
+   restart          <= bttn1_sync;
+   ext_interrupt(0) <= '0';
+   ext_interrupt(1) <= enet_int;
+   ext_interrupt(2) <= bttn2_sync;
+   ext_interrupt(3) <= bttn3_sync;
+   ext_interrupt(4) <= '0';
+   ext_interrupt(5) <= '0';
+   ext_interrupt(6) <= '0';
+   ext_interrupt(7) <= '0';
+   cop_exc          <= "0000";
+   cpu_write        <= wr OR pcb_wr;
+   cpu_read         <= rd OR pcb_rd;
+
+
+   CAPPUCCINO_CORE : core
+      GENERIC MAP (
+         FPU_FU        => INCLUDE_FPU)
+      PORT MAP (
+         reboot        => reset,
+         restart       => restart,
+         boot_sel      => '0',
+         bus_req       => '0',
+         clk           => clk,
+         cop0_exc      => cop_exc(0),
+         cop2_exc      => cop_exc(1),
+         cop3_exc      => cop_exc(2),
+         d_cache_miss  => cpu_cmiss,
+         ext_handler   => '0',
+         ext_interrupt => ext_interrupt,
+         i_cache_miss  => '0',
+         i_word        => imem_q,
+         offset        => (OTHERS => '0'),
+         rst_n         => rst_n,
+         stall         => stall,
+         bus_ack       => OPEN,
+         cop_id        => cop_id,
+         cop_rd        => cop_rd,
+         cop_rgi       => cop_rgi,
+         cop_wr        => cop_wr,
+         i_addr        => imem_addr,
+         int_ack       => OPEN,
+         int_done      => OPEN,
+         pcb_rd        => pcb_rd,
+         pcb_wr        => pcb_wr,
+         rd            => rd,
+         reset_n_out   => p_rst_n,
+         wr            => wr,
+         cop_data      => cop_data,
+         cop_q         => cop_q,
+         d_addr        => cpu_addr,
+         data_in       => cpu_data,
+         data_out      => cpu_q
+         );
+
+   ENET : enet_if
+      GENERIC MAP (
+         COPID => ENET_ID)
+
+      PORT MAP (
+         clk   => clk,
+         rst_n => p_rst_n,
+
+         fse_A      => fse_A,
+         enet_BE_n  => enet_BE_n,
+         enet_AEN   => enet_AEN,
+         enet_IOR_n => enet_IOR_n,
+         enet_IOW_n => enet_IOW_n,
+         enet_ADS_n => enet_ADS_n,
+
+         enet_INTR0   => enet_INTR0,
+         enet_LDEV_n  => enet_LDEV_n,
+         enet_IOCHRDY => enet_IOCHRDY,
+
+         enet_LCLK     => enet_LCLK,
+         enet_DATACS_n => enet_DATACS_n,
+         enet_W_R_n    => enet_W_R_n,
+         enet_CYCLE_n  => enet_CYCLE_n,
+         enet_RDYRTN_n => enet_RDYRTN_n,
+
+         enet_SRDY_n  => enet_SRDY_n,
+         enet_VLBUS_n => enet_VLBUS_n,
+         fse_D        => fse_D,
+
+--COFFEE coprocessor interface
+         cop_rd   => cop_rd,
+         cop_wr   => cop_wr,
+         cop_id   => cop_id,
+         cop_rgi  => cop_rgi,
+         cop_data => OPEN,              --!!!
+         enet_int => enet_int
+         );
+
+   DEC_7SD : decoder_7segs
+      GENERIC MAP (
+         COPID        => SSEG_ID
+         )
+      PORT MAP(
+         clk          => clk,
+         rst_n        => p_rst_n,
+         cop_id       => cop_id,
+         cop_wr       => cop_wr,
+         value_a      => cop_q(7 DOWNTO 0),
+         value_b      => cop_q(15 DOWNTO 8),
+         dot_a        => cop_q(16),
+         dot_b        => cop_q(17),
+         blank        => cop_q(18),
+         sel          => cop_rgi(0),
+         ss_a_decoded => ss_a_decoded,
+         ss_b_decoded => ss_b_decoded,
+         ss_a_dot     => ss_a_dot,
+         ss_b_dot     => ss_b_dot,
+         leds         => leds(6 DOWNTO 0)
+         );
+
+
+   STALL_SW : stall_switch
+      PORT MAP (
+         bttn_in   => buttons,
+         clk       => clk,
+         bttn0_out => bttn0_sync,
+         bttn1_out => bttn1_sync,
+         bttn2_out => bttn2_sync,
+         bttn3_out => bttn3_sync,
+         led       => leds(7),
+         stall     => stall
+         );
+
+   IMEM_INST : sp_imem
+      PORT MAP (
+         addr_A => imem_addr(14 DOWNTO 2),
+         clk    => mem_clk,
+         q_A    => imem_q
+         );
+
+
+END struct;
